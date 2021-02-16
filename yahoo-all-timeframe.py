@@ -112,7 +112,6 @@ fno_lot = fno.get_fno_lot_sizes(as_json=False);
 fno_list= list(fno_lot.keys());
 # fno_list = ['^NSEI','^NSEBANK']
 
-global df,historic_data,x,y,mapping,mn,mx, maxY,minY ,mindate, maxdate, closingPrice,STOCK
 
 def callMain():
     for stk in fno_list:
@@ -121,7 +120,7 @@ def callMain():
             #print(mapping)
             # print(stk)
             sr = rectangle(mapping)
-            if(len(sr) > 2):
+            if(len(sr) > 4):
                 print("\n{} - current {:.2f}".format(stk,mapping[0][1]))
                 for dt in sr:
                     print("( {} {:.2f} {:.2f} {:.2f} )".format(*dt))
@@ -135,12 +134,12 @@ LOW = 3;
 
 FORMAT = "%d-%m-%Y";
 INTERVAL = '1d'
-FROM = 30;
+FROM = 180;
 PRECENT = 0.5;
 
 containsIndex = '^NSEI' in fno_list;
 
-if INTERVAL == '1d':
+if INTERVAL in ['1d' , '1wk']:
     FORMAT = "%d-%m-%Y";
 else:
     FORMAT = "%d-%m-%Y %H:%M";
