@@ -58,7 +58,12 @@ def getNR(mapping):
                         'count': count
                     }
                 break;
-                
+            if(BREAKOUT and count > 5):
+                obj = {
+                    'current':current,
+                    'last': mapping[j],
+                    'count': count
+                }
     return  obj
     # for j in range(2,len(mapping)-30):
     #     if( (mapping[j-1][CLOSE] > mapping[j][CLOSE] < mapping[j+1][CLOSE]) and (mapping[j-2][CLOSE] > mapping[j][CLOSE] < mapping[j+2][CLOSE])):
@@ -176,6 +181,7 @@ FORMAT = "%d-%m-%Y";
 INTERVAL = '1h'
 FROM = 180;
 PRECENT = 0.5;
+BREAKOUT = False;
 
 containsIndex = '^NSEI' in fno_list;
 
