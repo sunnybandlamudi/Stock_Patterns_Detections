@@ -51,14 +51,14 @@ def getNR(mapping):
             if(current[HIGH] > mapping[j][HIGH] and current[LOW] < mapping[j][LOW]):
                 count += 1;
             else:
-                if(count > 5):
+                if(count > MIN_BREAKOUT_SIZE):
                     obj = {
                         'current':current,
                         'last': mapping[j],
                         'count': count
                     }
                 break;
-            if(BREAKOUT and count > 5):
+            if(BREAKOUT and count > MIN_BREAKOUT_SIZE):
                 obj = {
                     'current':current,
                     'last': mapping[j],
@@ -182,6 +182,7 @@ INTERVAL = '1h'
 FROM = 180;
 PRECENT = 0.5;
 BREAKOUT = False;
+MIN_BREAKOUT_SIZE = 5
 
 containsIndex = '^NSEI' in fno_list;
 
