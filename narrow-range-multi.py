@@ -29,12 +29,13 @@ def getYahooData(stock):
     close = data.json()['chart']['result'][0]['indicators']['quote'][0]['close'][::-1];
     high = data.json()['chart']['result'][0]['indicators']['quote'][0]['high'][::-1];
     low = data.json()['chart']['result'][0]['indicators']['quote'][0]['low'][::-1];
+    volume = data.json()['chart']['result'][0]['indicators']['quote'][0]['volume'][::-1];
     timestamp = data.json()['chart']['result'][0]['timestamp'][::-1];
     if containsIndex:
         timestamp = list(map( lambda item: datetime.fromtimestamp(item).strftime(FORMAT),timestamp));
     else:
         timestamp = list(map( lambda item: datetime.fromtimestamp(item).strftime(FORMAT),timestamp));
-    data = list(zip(timestamp,close,high,low));
+    data = list(zip(timestamp,close,high,low,volume));
     data = list(filter(lambda item: item[0] and item[1] and item[2] and item[3],data))
     return data
 
@@ -42,23 +43,28 @@ def getNR(mapping):
     maxpoint = None;
     localMax = []
     obj = None;
+    avgVolume = sum(map(lambda item: item[VOLUME],mapping[100:]))/len(mapping[100:]);
     mapping = list(reversed(mapping[:100]))
 
-    for i in range(len(mapping)-1):
+    for i in range(1,len(mapping)-1):
         current = mapping[i];
         count = 0 ;
+        # added to get the trend 5 days before
+        if(CHECK_PAST_TREND and current[CLOSE] < max(map(lambda item: item[CLOSE] ,mapping[i if i-PAST_TREND_NUMBER > i-PAST_TREND_NUMBER else 0:i]))):
+            continue;
+            
         for j in range(i+1,len(mapping)):
             if(current[HIGH] > mapping[j][HIGH] and current[LOW] < mapping[j][LOW]):
                 count += 1;
             else:
-                if(count > MIN_BREAKOUT_SIZE):
+                if((count > MIN_BREAKOUT_SIZE) and (not CHECK_AVERAGE or (CHECK_AVERAGE and mapping[j][VOLUME] >= avgVolume))):
                     obj = {
                         'current':current,
                         'last': mapping[j],
                         'count': count
                     }
                 break;
-            if(BREAKOUT and count > MIN_BREAKOUT_SIZE):
+            if(not BREAKOUT and count > MIN_BREAKOUT_SIZE ):
                 obj = {
                     'current':current,
                     'last': mapping[j],
@@ -176,13 +182,17 @@ def callMain():
 CLOSE = 1;
 HIGH = 2;
 LOW = 3;
+VOLUME = 4;
 
 FORMAT = "%d-%m-%Y";
 INTERVAL = '1h'
-FROM = 180;
+FROM = 150;
 PRECENT = 0.5;
-BREAKOUT = False;
-MIN_BREAKOUT_SIZE = 5
+BREAKOUT = True;
+MIN_BREAKOUT_SIZE = 5;
+PAST_TREND_NUMBER = 10;
+CHECK_PAST_TREND = True
+CHECK_AVERAGE = True
 
 containsIndex = '^NSEI' in fno_list;
 
@@ -190,7 +200,6 @@ if INTERVAL in ['1d' , '1wk']:
     FORMAT = "%d-%m-%Y";
 else:
     FORMAT = "%d-%m-%Y %H:%M";
-
 
 #getNRone()
 
