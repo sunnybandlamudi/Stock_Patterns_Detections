@@ -151,11 +151,21 @@ def dateCountCompare(item1, item2):
     else:
         return -1;
 
-def cmp(it1,it2):
-    return 0;
-def callMain():
+def writetofile(items):
+    with open('stocks.txt','w') as f:
+        for item in items:
+            f.write('\n\n{} - {:.2f}\nRecent {} - {:.2f}\nStart  {} - {:.2f}\nCount {}'.format(item['stk'],item['lastPrice'],item['last'][0],item['last'][1],item['current'][0],item['current'][1],item['count']))
+            if(item['sr']):
+                for dt in item['sr']:
+                    f.write("\n( {} {:.2f} {:.2f} {:.2f} )".format(*dt))
+        pass
+
+def callMain(*STOCK):
     items = []
-    for stk in fno_list:
+    stock_list = fno_list;
+    if(bool(STOCK)):
+        stock_list = list(STOCK)
+    for stk in stock_list:
         try:
             mapping = getYahooData(stk);
             #print(mapping)
@@ -167,8 +177,9 @@ def callMain():
                 obj['lastPrice'] = mapping[0][1];
                 print(obj['stk'],obj['count'],obj['current'])
                 items.append(obj);
-            
-            
+                sr = rectangle(mapping)
+                obj['sr'] = sr;
+
 
         except :
             #print(stk);
@@ -176,7 +187,12 @@ def callMain():
     items = sorted(items,key=functools.cmp_to_key(dateCountCompare));
     
     for item in items:
-        print('\n{} - {:.2f}\nRecent {} - {:.2f}\nStart  {} - {:.2f}\nCount {}\n'.format(item['stk'],item['lastPrice'],item['last'][0],item['last'][1],item['current'][0],item['current'][1],item['count']))
+        print('\n{} - {:.2f}\nRecent {} - {:.2f}\nStart  {} - {:.2f}\nCount {}'.format(item['stk'],item['lastPrice'],item['last'][0],item['last'][1],item['current'][0],item['current'][1],item['count']))
+        if(item['sr']):
+            for dt in item['sr']:
+                print("( {} {:.2f} {:.2f} {:.2f} )".format(*dt))
+    
+    writetofile(items);        
         
         
 CLOSE = 1;
@@ -188,7 +204,7 @@ FORMAT = "%d-%m-%Y";
 INTERVAL = '1h'
 FROM = 150;
 PRECENT = 0.5;
-BREAKOUT = True;
+BREAKOUT = False;
 MIN_BREAKOUT_SIZE = 5;
 PAST_TREND_NUMBER = 10;
 CHECK_PAST_TREND = True
@@ -203,7 +219,8 @@ else:
 
 #getNRone()
 
-callMain();
+callMain('TRENT','ITC');
+# callMain();
 
 
     
