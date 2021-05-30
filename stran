@@ -1,0 +1,265 @@
+
+from pprint import pprint;
+import requests as req;
+from nsetools import nse
+from collections import  namedtuple;
+import schedule;
+import time;
+import datetime;
+import json;
+head = {
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.105 Safari/537.36",
+}
+
+
+# Getting fno lot size
+fno = nse.Nse()
+fno_lot = fno.get_fno_lot_sizes(as_json=False);
+
+call="CE"
+put="PE"
+
+RECORDS, FILTERED = 0,0;
+
+
+def round_position(number, n=2):
+    d = 10**n;
+    return int(number/d) * d;
+
+class OptionChain:
+    def __init__(self,stock, expiry = None):
+        self.stock = stock;
+        self.get_optionchain(stock);
+        self.set_expiry(expiry);
+        self.seggrigate_pe_ce();
+
+
+    def get_optionchain(self, stock):
+        ses = req.Session()
+        ses.get('https://www.nseindia.com',headers=head)
+        data = ses.get('https://www.nseindia.com/api/option-chain-indices', params={'symbol':stock}, headers = head)
+        self.response = json.loads(data.text, object_hook=lambda d: namedtuple('X', d.keys())(*d.values()))
+        # with open("data_file.json", "r") as read_file:
+        #     data = json.load(read_file)
+        # self.response = json.loads(json.dumps(data), object_hook=lambda d: namedtuple('X', d.keys())(*d.values()))
+        self.records = self.response.records
+        self.filtered = self.response.filtered
+        self.ltp = self.records.underlyingValue;
+        self.lot_size = 75;
+        # return data.json()['filtered']
+        # return json.loads(data.text, object_hook=lambda d: namedtuple('X', d.keys())(*d.values()))
+
+    def set_expiry(self,expiry):
+        if(expiry == None):
+            self.expiry = self.records.expiryDates[0];
+        else:
+            self.expiry = expiry;
+    
+    def seggrigate_pe_ce(self):
+        PE = [];
+        CE = [];
+        for data in self.records.data:
+            if(put in  data._fields):
+                if(self.expiry == data.expiryDate):
+                    PE.append(data.PE);
+            if(call in  data._fields):
+                if(self.expiry == data.expiryDate):
+                    CE.append(data.CE);
+        self.pe_list = PE;
+        self.ce_list = CE;
+        
+    def get_pe_close(self,value):
+        for item in self.pe_list:
+            if(item.lastPrice > value):
+                return item;
+    
+    def get_ce_close(self,value):
+        for item in reversed(self.ce_list):
+            if(item.lastPrice > value):
+                return item;
+            
+    def trade_setup(self, pe_value = 30, ce_value = 30):
+        pe = self.get_pe_close(pe_value);
+        ce = self.get_ce_close(ce_value);
+        self.profit = 0;
+        traded_price = {
+            "pe": pe,
+            "ce": ce,
+            "expiry": self.expiry,
+            "ltp": self.ltp
+        }
+        
+        self.traded_price = namedtuple("X",traded_price)(**traded_price);
+        self.entry_price = self.traded_price;
+        
+        return ;
+    
+    def get_pe_strike(self,stirke):
+        for item in self.pe_list:
+            if(item.strikePrice == stirke):
+                return item;
+
+    def get_ce_strike(self,stirke):
+        for item in self.ce_list:
+            if(item.strikePrice == stirke):
+                return item;
+    
+    def update_option(self):
+        # Get Option chain data
+        now = datetime.datetime.now()
+        print ("Current date and time : ")
+        print (now.strftime("%Y-%m-%d %H:%M:%S"))
+        
+        
+        self.get_optionchain(self.stock);
+        
+        # Seperate PE and CE values
+        self.seggrigate_pe_ce();
+
+        # Get the current price of PE
+        pe = self.get_pe_strike(self.traded_price.pe.strikePrice);
+        
+        # Get the current price of CE
+        ce = self.get_ce_strike(self.traded_price.ce.strikePrice);
+        
+        pprint(pe)
+        pprint(ce)
+        
+        
+        profit = self.get_profit(pe.lastPrice, ce.lastPrice);
+        
+        if(profit > 3000):
+            print("Closing with profit");
+            
+            self.square_off(pe,ce)
+            
+        else:
+            
+            self.check_adjustments(pe,ce);
+    
+    def square_off(self,pe,ce):
+        traded_price = self.traded_price._asdict();
+        traded_price['pe'] = pe
+        traded_price['ce'] = ce
+
+        self.exit_price = namedtuple("X",traded_price)(**traded_price);
+        
+        
+    def check_adjustments(self,_pe, _ce):
+
+        # Check Straddle 
+        if(self.traded_price.pe.strikePrice == self.traded_price.ce.strikePrice):
+            total = self.traded_price.pe.lastPrice + self.traded_price.ce.lastPrice;
+            if((_pe.lastPrice + _ce.lastPrice) > total*.8):
+                print("Book Loss");
+                self.get_profit(_pe.lastPrice,_ce.lastPrice);
+                self.square_off(_pe,_ce);
+                return;
+            print("Strangle")
+            return ;
+                
+    #   check if pe premium is less than half; (PE in profit need to move farword)
+        if(self.traded_price.ce.lastPrice * 0.5 > self.traded_price.pe.lastPrice): 
+            print("Need to square off PE");
+            self.profit += _pe.lastPrice - self.traded_price.pe.lastPrice;
+            pe = self.get_pe_close( _ce.lastPrice * 0.8);
+            # Checking if PE exceeded CE
+            if(pe.strikePrice > self.traded_price.ce.strikePrice):
+                # Becomes Straddle
+                print(" Becomes Straddle")
+                pe = self.get_pe_strike(self.traded_price.ce.strikePrice)
+            self.update_pe(pe);
+            return;
+            
+        if(self.traded_price.pe.lastPrice * 0.5 > self.traded_price.ce.lastPrice):
+            print("Need to square off CE");
+            self.profit += _ce.lastPrice - self.traded_price.ce.lastPrice;
+            ce = self.get_ce_close( _pe.lastPrice * 0.8)
+            if(ce.strikePrice < self.traded_price.pe.strikePrice):
+                # Becomes Straddle
+                print(" Becomes Straddle")
+                ce = self.get_ce_strike(self.traded_price.pe.strikePrice)
+            self.update_ce(ce);
+            return 
+        
+    
+    pass
+    
+    def update_pe(self,pe):
+        traded_price = self.traded_price._asdict();
+        traded_price['pe'] = pe;
+
+        self.traded_price = namedtuple("X",traded_price)(**traded_price);
+
+    def update_ce(self,ce):
+        traded_price = self.traded_price._asdict();
+        traded_price['ce'] = ce;
+
+        self.traded_price = namedtuple("X",traded_price)(**traded_price);
+        
+        
+    def get_reliased_profit(self):
+        print("Profit\t{:.2f}".format(self.profit* self.lot_size))
+        
+    def get_profit(self, pe_value, ce_value):
+        
+        profit = 0;
+        profit += pe_value - self.traded_price.pe.lastPrice;
+        profit += ce_value - self.traded_price.ce.lastPrice;
+        # Adding existing profit
+        profit += self.profit;
+        
+        profit *= self.lot_size;
+        
+        if(profit > 0 ):
+            print("Profit\t{:.2f}".format(profit))
+        else:
+            print("Loss\t{:.2f}".format(profit))
+        
+        return profit;
+    
+    def set_pe_ce(self,pe_value,ce_value):
+        
+        pe = self.traded_price.pe._asdict();
+        pe['lastPrice'] = pe_value;
+        pe =  namedtuple("X",pe)(**pe);
+        
+        ce = self.traded_price.ce._asdict();
+        ce['lastPrice'] = ce_value;
+        ce =  namedtuple("X",ce)(**ce);
+
+        traded_price = {
+            "pe": pe,
+            "ce": ce,
+            "expiry": self.expiry,
+            "ltp": self.ltp
+        }
+
+        self.traded_price = namedtuple("X",traded_price)(**traded_price);
+        
+            
+nifty = OptionChain('NIFTY','10-Jun-2021');
+
+nifty.trade_setup();
+
+# nifty.set_pe_ce(20,50);
+# 
+# nifty.update_option();
+# 
+# nifty.set_pe_ce(40,60);
+# 
+# nifty.update_option();
+# 
+# nifty.set_pe_ce(70,30);
+# 
+# nifty.update_option();
+
+
+def get_update():
+    nifty.update_option();
+    
+schedule.every(5).seconds.do(get_update);
+
+while True:
+    schedule.run_pending();
+    time.sleep(1)
