@@ -1,12 +1,18 @@
-
+from json import JSONEncoder
 from pprint import pprint;
 import requests as req;
 from nsetools import nse
 from collections import  namedtuple;
 import schedule;
 import time;
+import os;
 import datetime;
 import json;
+from dotmap import DotMap;
+import pickle
+
+from websocket._http import proxy_info
+
 head = {
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.105 Safari/537.36",
 }
@@ -26,7 +32,36 @@ def round_position(number, n=2):
     d = 10**n;
     return int(number/d) * d;
 
-class OptionChain:
+
+class ObjectFactory:
+    
+    def __init__(self):
+        pass;
+    
+    def save_object(self,obj,name = None):
+        now = datetime.datetime.now()
+        path = "strangle-data/" + obj.stock + "/";
+        if not os.path.exists(path):
+            os.makedirs(path)
+        if(name == None):
+            nameStamp = obj.stock + "-" + now.strftime("%Y-%m-%d_%H-%M-%S")+".pck"
+        else:
+            nameStamp = "latest.pck"
+        with open(path+nameStamp,"wb") as fd:
+            pickle.dump(obj,fd);
+        return nameStamp;
+    
+    def load_object(self,name = None,stock="NIFTY" ):
+        name = name+".pck";
+        path = f"strangle-data/{stock}/{name}"
+        try:
+            with open(path,"rb") as fd:
+                data = pickle.load(fd);
+                return data;
+        except: 
+            print("not such dir")
+
+class OptionChain():
     def __init__(self,stock, expiry = None):
         self.stock = stock;
         self.get_optionchain(stock);
@@ -38,7 +73,7 @@ class OptionChain:
         ses = req.Session()
         ses.get('https://www.nseindia.com',headers=head)
         data = ses.get('https://www.nseindia.com/api/option-chain-indices', params={'symbol':stock}, headers = head)
-        self.response = json.loads(data.text, object_hook=lambda d: namedtuple('X', d.keys())(*d.values()))
+        self.response = json.loads(data.text, object_hook=lambda d: DotMap(d))
         # with open("data_file.json", "r") as read_file:
         #     data = json.load(read_file)
         # self.response = json.loads(json.dumps(data), object_hook=lambda d: namedtuple('X', d.keys())(*d.values()))
@@ -54,30 +89,30 @@ class OptionChain:
             self.expiry = self.records.expiryDates[0];
         else:
             self.expiry = expiry;
-    
+
     def seggrigate_pe_ce(self):
         PE = [];
         CE = [];
         for data in self.records.data:
-            if(put in  data._fields):
+            if(put in  data):
                 if(self.expiry == data.expiryDate):
                     PE.append(data.PE);
-            if(call in  data._fields):
+            if(call in  data):
                 if(self.expiry == data.expiryDate):
                     CE.append(data.CE);
         self.pe_list = PE;
         self.ce_list = CE;
-        
+
     def get_pe_close(self,value):
         for item in self.pe_list:
             if(item.lastPrice > value):
                 return item;
-    
+
     def get_ce_close(self,value):
         for item in reversed(self.ce_list):
             if(item.lastPrice > value):
                 return item;
-            
+
     def trade_setup(self, pe_value = 30, ce_value = 30):
         pe = self.get_pe_close(pe_value);
         ce = self.get_ce_close(ce_value);
@@ -88,12 +123,12 @@ class OptionChain:
             "expiry": self.expiry,
             "ltp": self.ltp
         }
-        
-        self.traded_price = namedtuple("X",traded_price)(**traded_price);
+
+        self.traded_price = DotMap(traded_price)
         self.entry_price = self.traded_price;
-        
+
         return ;
-    
+
     def get_pe_strike(self,stirke):
         for item in self.pe_list:
             if(item.strikePrice == stirke):
@@ -103,63 +138,67 @@ class OptionChain:
         for item in self.ce_list:
             if(item.strikePrice == stirke):
                 return item;
-    
+
     def update_option(self):
         # Get Option chain data
         now = datetime.datetime.now()
         print ("Current date and time : ")
         print (now.strftime("%Y-%m-%d %H:%M:%S"))
-        
-        
+
+
         self.get_optionchain(self.stock);
-        
+
         # Seperate PE and CE values
         self.seggrigate_pe_ce();
 
         # Get the current price of PE
         pe = self.get_pe_strike(self.traded_price.pe.strikePrice);
-        
+
         # Get the current price of CE
         ce = self.get_ce_strike(self.traded_price.ce.strikePrice);
         
-        pprint(pe)
-        pprint(ce)
-        
-        
-        profit = self.get_profit(pe.lastPrice, ce.lastPrice);
-        
-        if(profit > 3000):
-            print("Closing with profit");
+        try:
+            print(pe.strikePrice,pe.lastPrice)
+            print(ce.strikePrice,ce.lastPrice)
             
-            self.square_off(pe,ce)
-            
-        else:
-            
-            self.check_adjustments(pe,ce);
+
+            profit = self.get_profit(pe.lastPrice, ce.lastPrice);
     
+            if(profit > 3000):
+                print("Closing with profit");
+    
+                self.square_off(pe,ce)
+    
+            else:
+    
+                self.check_adjustments(pe,ce);
+
+        except:
+            print("No Stirke Values")
+
     def square_off(self,pe,ce):
-        traded_price = self.traded_price._asdict();
+        traded_price = self.traded_price;
         traded_price['pe'] = pe
         traded_price['ce'] = ce
 
-        self.exit_price = namedtuple("X",traded_price)(**traded_price);
-        
-        
+        self.exit_price = DotMap(traded_price)
+
+
     def check_adjustments(self,_pe, _ce):
 
         # Check Straddle 
         if(self.traded_price.pe.strikePrice == self.traded_price.ce.strikePrice):
             total = self.traded_price.pe.lastPrice + self.traded_price.ce.lastPrice;
-            if((_pe.lastPrice + _ce.lastPrice) > total*.8):
+            if((_pe.lastPrice + _ce.lastPrice) > (total + total*.8)):
                 print("Book Loss");
                 self.get_profit(_pe.lastPrice,_ce.lastPrice);
                 self.square_off(_pe,_ce);
                 return;
             print("Strangle")
             return ;
-                
-    #   check if pe premium is less than half; (PE in profit need to move farword)
-        if(self.traded_price.ce.lastPrice * 0.5 > self.traded_price.pe.lastPrice): 
+
+        #   check if pe premium is less than half; (PE in profit need to move farword)
+        if(self.traded_price.ce.lastPrice * 0.5 > self.traded_price.pe.lastPrice):
             print("Need to square off PE");
             self.profit += _pe.lastPrice - self.traded_price.pe.lastPrice;
             pe = self.get_pe_close( _ce.lastPrice * 0.8);
@@ -170,7 +209,7 @@ class OptionChain:
                 pe = self.get_pe_strike(self.traded_price.ce.strikePrice)
             self.update_pe(pe);
             return;
-            
+
         if(self.traded_price.pe.lastPrice * 0.5 > self.traded_price.ce.lastPrice):
             print("Need to square off CE");
             self.profit += _ce.lastPrice - self.traded_price.ce.lastPrice;
@@ -180,53 +219,53 @@ class OptionChain:
                 print(" Becomes Straddle")
                 ce = self.get_ce_strike(self.traded_price.pe.strikePrice)
             self.update_ce(ce);
-            return 
-        
-    
+            return
+
+
     pass
-    
+
     def update_pe(self,pe):
-        traded_price = self.traded_price._asdict();
+        traded_price = self.traded_price;
         traded_price['pe'] = pe;
 
-        self.traded_price = namedtuple("X",traded_price)(**traded_price);
+        self.traded_price = DotMap(traded_price)
 
     def update_ce(self,ce):
-        traded_price = self.traded_price._asdict();
+        traded_price = self.traded_price;
         traded_price['ce'] = ce;
 
-        self.traded_price = namedtuple("X",traded_price)(**traded_price);
-        
-        
+        self.traded_price = DotMap(traded_price)
+
+
     def get_reliased_profit(self):
         print("Profit\t{:.2f}".format(self.profit* self.lot_size))
-        
+
     def get_profit(self, pe_value, ce_value):
-        
+
         profit = 0;
-        profit += pe_value - self.traded_price.pe.lastPrice;
-        profit += ce_value - self.traded_price.ce.lastPrice;
+        profit += self.traded_price.pe.lastPrice -  pe_value ;
+        profit += self.traded_price.ce.lastPrice - ce_value ;
         # Adding existing profit
         profit += self.profit;
-        
+
         profit *= self.lot_size;
-        
+
         if(profit > 0 ):
             print("Profit\t{:.2f}".format(profit))
         else:
             print("Loss\t{:.2f}".format(profit))
-        
+
         return profit;
-    
+
     def set_pe_ce(self,pe_value,ce_value):
-        
-        pe = self.traded_price.pe._asdict();
+
+        pe = self.traded_price.pe;
         pe['lastPrice'] = pe_value;
-        pe =  namedtuple("X",pe)(**pe);
-        
-        ce = self.traded_price.ce._asdict();
+        pe =  DotMap(pe)
+
+        ce = self.traded_price.ce;
         ce['lastPrice'] = ce_value;
-        ce =  namedtuple("X",ce)(**ce);
+        ce =  DotMap(ce)
 
         traded_price = {
             "pe": pe,
@@ -235,13 +274,21 @@ class OptionChain:
             "ltp": self.ltp
         }
 
-        self.traded_price = namedtuple("X",traded_price)(**traded_price);
+        self.traded_price = DotMap(traded_price);
         
-            
-nifty = OptionChain('NIFTY','10-Jun-2021');
+# nifty = OptionChain('NIFTY','10-Jun-2021');
 
-nifty.trade_setup();
 
+# json.dumps(nifty.traded_price, default=MyEncoder)
+# 
+# en = MyEncoder();
+# 
+# en.encode(nifty)
+# 
+# pickle_in  = pickle.dump(nifty, open('strangle-data/latest.pic',"wb"),pickle.HIGHEST_PROTOCOL);
+# 
+# print(pickle_in)
+# 
 # nifty.set_pe_ce(20,50);
 # 
 # nifty.update_option();
@@ -254,12 +301,27 @@ nifty.trade_setup();
 # 
 # nifty.update_option();
 
+#
+
+
+
+# nifty.trade_setup(70,70);
+loader = ObjectFactory()
+
+obj = loader.load_object("latest");
+
+if obj:
+    nifty = obj;
+else:
+    nifty = OptionChain('NIFTY');
 
 def get_update():
     nifty.update_option();
+    loader.save_object(nifty)
     
-schedule.every(5).seconds.do(get_update);
+
+schedule.every(10).seconds.do(get_update);
 
 while True:
     schedule.run_pending();
-    time.sleep(1)
+    time.sleep(1);
