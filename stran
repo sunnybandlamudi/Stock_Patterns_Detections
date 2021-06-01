@@ -11,7 +11,6 @@ import json;
 from dotmap import DotMap;
 import pickle
 
-from websocket._http import proxy_info
 
 head = {
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.105 Safari/537.36",
@@ -309,18 +308,22 @@ class OptionChain():
 loader = ObjectFactory()
 
 obj = loader.load_object("latest");
+obj = None
 
 if obj:
     nifty = obj;
 else:
     nifty = OptionChain('NIFTY');
+    nifty.trade_setup(70,80);
+    loader.save_object(nifty,"latest")
 
 def get_update():
     nifty.update_option();
     loader.save_object(nifty)
     
 
-schedule.every(10).seconds.do(get_update);
+# schedule.every(1).minutes.do(get_update);
+schedule.every(5).seconds.do(get_update);
 
 while True:
     schedule.run_pending();
