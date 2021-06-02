@@ -1,6 +1,7 @@
 from json import JSONEncoder
 from pprint import pprint;
 import requests as req;
+from future.backports.datetime import date, datetime
 from nsetools import nse
 from collections import  namedtuple;
 import schedule;
@@ -11,6 +12,7 @@ import json;
 from dotmap import DotMap;
 import pickle
 
+from schedule import ScheduleError
 
 head = {
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.105 Safari/537.36",
@@ -26,6 +28,14 @@ put="PE"
 
 RECORDS, FILTERED = 0,0;
 
+INDICES = ["NIFTY","BANKNIFTY","FINNIFTY"]
+
+INDICES_URL = "https://www.nseindia.com/api/option-chain-indices"
+
+EQUITY_URL = "https://www.nseindia.com/api/option-chain-equities"
+
+
+
 
 def round_position(number, n=2):
     d = 10**n;
@@ -33,23 +43,23 @@ def round_position(number, n=2):
 
 
 class ObjectFactory:
-    
+
     def __init__(self):
         pass;
-    
+
     def save_object(self,obj,name = None):
         now = datetime.datetime.now()
         path = "strangle-data/" + obj.stock + "/";
         if not os.path.exists(path):
             os.makedirs(path)
         if(name == None):
-            nameStamp = obj.stock + "-" + now.strftime("%Y-%m-%d_%H-%M-%S")+".pck"
+            nameStamp = obj.stock + "-" + obj.time_stamp+ ".pck"
         else:
-            nameStamp = "latest.pck"
+            nameStamp = name or "latest.pck"
         with open(path+nameStamp,"wb") as fd:
             pickle.dump(obj,fd);
         return nameStamp;
-    
+
     def load_object(self,name = None,stock="NIFTY" ):
         name = name+".pck";
         path = f"strangle-data/{stock}/{name}"
@@ -57,12 +67,21 @@ class ObjectFactory:
             with open(path,"rb") as fd:
                 data = pickle.load(fd);
                 return data;
-        except: 
+        except:
             print("not such dir")
 
 class OptionChain():
-    def __init__(self,stock, expiry = None):
+    def __init__(self,stock, expiry = None, adjustment_percent= 0.5, strangle_adjustment = 0.1):
         self.stock = stock;
+        self.lot_size = fno_lot[self.stock]
+        self.adjustment_percent = adjustment_percent
+        self.strangle_adjustment = strangle_adjustment 
+        now = datetime.datetime.now()
+        self.time_stamp = now.strftime("%Y-%m-%d_%H-%M-%S");
+        # self.fd = open(f"strangle-data/trade-data/{self.time_stamp}","a");
+        
+        self.loader = ObjectFactory();
+        
         self.get_optionchain(stock);
         self.set_expiry(expiry);
         self.seggrigate_pe_ce();
@@ -71,7 +90,13 @@ class OptionChain():
     def get_optionchain(self, stock):
         ses = req.Session()
         ses.get('https://www.nseindia.com',headers=head)
-        data = ses.get('https://www.nseindia.com/api/option-chain-indices', params={'symbol':stock}, headers = head)
+        
+        if stock in INDICES:
+            url = INDICES_URL
+        else: 
+            url = EQUITY_URL
+        data = ses.get(url, params={'symbol':stock}, headers = head)
+        
         self.response = json.loads(data.text, object_hook=lambda d: DotMap(d))
         # with open("data_file.json", "r") as read_file:
         #     data = json.load(read_file)
@@ -79,7 +104,6 @@ class OptionChain():
         self.records = self.response.records
         self.filtered = self.response.filtered
         self.ltp = self.records.underlyingValue;
-        self.lot_size = 75;
         # return data.json()['filtered']
         # return json.loads(data.text, object_hook=lambda d: namedtuple('X', d.keys())(*d.values()))
 
@@ -143,6 +167,8 @@ class OptionChain():
         now = datetime.datetime.now()
         print ("Current date and time : ")
         print (now.strftime("%Y-%m-%d %H:%M:%S"))
+        
+        self.time_stamp = now.strftime("%Y-%m-%d_%H-%M-%S");
 
 
         self.get_optionchain(self.stock);
@@ -155,22 +181,23 @@ class OptionChain():
 
         # Get the current price of CE
         ce = self.get_ce_strike(self.traded_price.ce.strikePrice);
-        
+
         try:
             print(pe.strikePrice,pe.lastPrice)
             print(ce.strikePrice,ce.lastPrice)
-            
+
 
             profit = self.get_profit(pe.lastPrice, ce.lastPrice);
-    
-            if(profit > 3000):
+
+            if(profit > 2000):
                 print("Closing with profit");
-    
+
                 self.square_off(pe,ce)
-    
+
             else:
-    
+
                 self.check_adjustments(pe,ce);
+                # schedule.clear(self.stock)
 
         except:
             print("No Stirke Values")
@@ -181,25 +208,35 @@ class OptionChain():
         traded_price['ce'] = ce
 
         self.exit_price = DotMap(traded_price)
+        schedule.clear(self.stock)
 
 
     def check_adjustments(self,_pe, _ce):
+        
+        current_time = datetime.datetime.now().time();
+        straddle_time = datetime.time(15,25);
+        adjustment_percent = self.adjustment_percent;
+        
+        # At end of date we need to convert change adjustment to 80%
+        if( current_time > straddle_time):
+            adjustment_percent = 0.8;
 
         # Check Straddle 
         if(self.traded_price.pe.strikePrice == self.traded_price.ce.strikePrice):
             total = self.traded_price.pe.lastPrice + self.traded_price.ce.lastPrice;
-            if((_pe.lastPrice + _ce.lastPrice) > (total + total*.8)):
+            if((_pe.lastPrice + _ce.lastPrice) > (total + (total * 0.1))):
                 print("Book Loss");
                 self.get_profit(_pe.lastPrice,_ce.lastPrice);
                 self.square_off(_pe,_ce);
+                # exit(0)
                 return;
             print("Strangle")
             return ;
 
         #   check if pe premium is less than half; (PE in profit need to move farword)
-        if(self.traded_price.ce.lastPrice * 0.5 > self.traded_price.pe.lastPrice):
+        if(_ce.lastPrice * adjustment_percent > _pe.lastPrice):
             print("Need to square off PE");
-            self.profit += _pe.lastPrice - self.traded_price.pe.lastPrice;
+            self.profit += self.traded_price.pe.lastPrice - _pe.lastPrice;
             pe = self.get_pe_close( _ce.lastPrice * 0.8);
             # Checking if PE exceeded CE
             if(pe.strikePrice > self.traded_price.ce.strikePrice):
@@ -209,9 +246,9 @@ class OptionChain():
             self.update_pe(pe);
             return;
 
-        if(self.traded_price.pe.lastPrice * 0.5 > self.traded_price.ce.lastPrice):
+        if(_pe.lastPrice * adjustment_percent > _ce.lastPrice):
             print("Need to square off CE");
-            self.profit += _ce.lastPrice - self.traded_price.ce.lastPrice;
+            self.profit += self.traded_price.ce.lastPrice - _ce.lastPrice ;
             ce = self.get_ce_close( _pe.lastPrice * 0.8)
             if(ce.strikePrice < self.traded_price.pe.strikePrice):
                 # Becomes Straddle
@@ -220,8 +257,6 @@ class OptionChain():
             self.update_ce(ce);
             return
 
-
-    pass
 
     def update_pe(self,pe):
         traded_price = self.traded_price;
@@ -275,6 +310,27 @@ class OptionChain():
 
         self.traded_price = DotMap(traded_price);
         
+        
+    #   schedule task
+
+    def get_update(self,save):
+        # print(save)
+        self.update_option();
+        # current_time = datetime.datetime.now().time();
+        # market_time = datetime.time(15,30);
+        # if current_time > market_time:
+        #     self.loader.save_object(self);
+        #     schedule.clear(self.stock)
+        if save:
+            self.loader.save_object(self)
+
+    def task_schedule(self, t_seconds = 5 ,save = False):
+        
+        schedule.every(t_seconds).seconds.do(self.get_update,save).tag(self.stock);
+
+            # schedule.cancel_job(schedule.jobs[0])
+        
+
 # nifty = OptionChain('NIFTY','10-Jun-2021');
 
 
@@ -307,24 +363,54 @@ class OptionChain():
 # nifty.trade_setup(70,70);
 loader = ObjectFactory()
 
-obj = loader.load_object("latest");
+obj = loader.load_object("latest","BANKNIFTY");
 obj = None
 
 if obj:
-    nifty = obj;
+    banknifty = obj;
 else:
-    nifty = OptionChain('NIFTY');
-    nifty.trade_setup(70,80);
-    loader.save_object(nifty,"latest")
+    banknifty = OptionChain('BANKNIFTY');
+    banknifty.trade_setup(100,100);
+    loader.save_object(banknifty,"latest")
 
-def get_update():
-    nifty.update_option();
-    loader.save_object(nifty)
-    
 
-# schedule.every(1).minutes.do(get_update);
-schedule.every(5).seconds.do(get_update);
+banknifty.task_schedule(5);
+
+
 
 while True:
     schedule.run_pending();
+    if(not schedule.jobs):
+        break;
     time.sleep(1);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 
+# def task_schedule(t_seconds = 5 ,save = False):
+#     def get_update():
+#         banknifty.update_option();
+#     # loader.save_object(banknifty)
+# 
+# 
+#     # schedule.every(1).minutes.do(get_update);
+#     schedule.every(t_seconds).seconds.do(get_update);
+#     
+#     while True:
+#         schedule.run_pending();
+#         time.sleep(1);
