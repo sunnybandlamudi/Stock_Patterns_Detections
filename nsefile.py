@@ -1,26 +1,74 @@
+import requests
+import csv
 
-from nsetools import nse
+# URL of the CSV file
+url = "https://nsearchives.nseindia.com/content/fo/fo_mktlots.csv"
+index_url = 'https://www.nseindia.com/api/equity-stockIndices'
 
-import time
+head = {
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.105 Safari/537.36",
+}
 
-import threading
+session = requests.Session()
+session.get('https://www.nseindia.com',headers=head)
 
-def printit(key):
-    print(key)
+def get_fno_lot_size():
 
-fno = nse.Nse()
+    session = requests.Session()
+    # Send an HTTP GET request to the URL
+    response = session.get(url, headers= head)
 
-lis=fno.get_fno_lot_sizes(as_json=False);
+    # Check if the request was successful
+    if response.status_code == 200:
+        # Create a dictionary to store key-value pairs
+        data_dict = {}
 
-lis = dict(lis);
-keys= list(lis.keys())
+        # Parse the CSV content
+        csv_data = response.text.splitlines()
+        csv_reader = csv.reader(csv_data[6:])
 
-print(keys[0])
+        for row in csv_reader:
+            if len(row) >= 3:
+                key = row[1].strip()
+                value = row[2].strip()
+                data_dict[key] = value
 
-# print(fno.get_quote(code=keys[2]))
+        # Print the key-value pairs
+        # for key, value in data_dict.items():
+        #     print(f"{key}: {value}")
+        return data_dict
+    else:
+        print("Failed to retrieve data from the URL.")
 
-for key in keys[4:]:
-    print(key.ljust(20) , str(lis[key]).rjust(20),str(fno.get_quote(key)['closePrice']).rjust(20),'{0:,}'.format(lis[key]*fno.get_quote(key)['closePrice']),sep='\t\t\t')
-    # time.sleep(1)
-    
-#     
+
+
+def get_index_data():
+
+    nse_dict = get_fno_lot_size()
+
+    params = {
+        'index': 'NIFTY 50'
+    }
+
+    response = session.get(index_url,params=params, headers = head)
+
+    if response.status_code == 200:
+        index_data = response.json()['data'];
+        for data in index_data:
+            # print(data['symbol'])
+            try:
+                symbol, lot_size, last_price = data['symbol'], int(nse_dict[data['symbol']]), data['lastPrice']
+                cal_price = (lot_size * last_price)/4
+                if cal_price > 50000 and cal_price < 150000:
+                    print('{: <15}\t{: <15}\t{: <15}'.format(symbol, lot_size, cal_price))
+            except Exception as e:
+                print(e)
+                pass
+
+def calcuate_stock():
+    index_data = get_index_data()
+
+# calcuate stock
+calcuate_stock()
+
+
