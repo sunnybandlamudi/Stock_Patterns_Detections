@@ -85,14 +85,14 @@ def get_nse_curl(url):
     result=subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return result.stdout.decode()
 
-def get_nse_data(url, isPython = True):
+def get_nse_data(url, params={}, isPython = True):
     import platform;
     if 'Linux' not in platform.platform() and isPython:
             import requests
             session = requests.Session()
             session.get('https://www.nseindia.com',headers=headers, timeout=5)
             # Send an HTTP GET request to the URL
-            response = session.get(url, headers= headers)
+            response = session.get(url, headers= headers, params=params)
             return response.text
     else:
         return get_nse_curl(url)
