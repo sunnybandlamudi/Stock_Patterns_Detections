@@ -43,8 +43,10 @@ def get_nse_cookie():
         print(e)
     return None
 
-def get_nse_curl(url):
-
+def get_nse_curl(url, params):
+    
+    from urllib.parse import urlencode
+    
     get_nse_cookie()
     
     headers = {
@@ -61,6 +63,12 @@ def get_nse_curl(url):
     'sec-fetch-dest': 'empty',
     'accept-language': 'en-US,en;q=0.9',
     }
+    
+    params_str = ""
+    
+    if(len(params)):
+        url += '?'+urlencode(params)
+
 
     command = [
     'curl',
@@ -95,4 +103,4 @@ def get_nse_data(url, params={}, isPython = True):
             response = session.get(url, headers= headers, params=params)
             return response.text
     else:
-        return get_nse_curl(url)
+        return get_nse_curl(url, params=params)
