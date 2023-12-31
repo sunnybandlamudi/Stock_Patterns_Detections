@@ -16,13 +16,14 @@ def get_fno_lot_size():
 
     # Parse the CSV content
     csv_data = response.splitlines()
-    csv_reader = csv.reader(csv_data[6:])
+    csv_reader = csv.reader(csv_data[:])
 
     for row in csv_reader:
         if len(row) >= 3:
             key = row[1].strip()
             value = row[2].strip()
-            data_dict[key] = value
+            if(value.isnumeric()):
+                data_dict[key] = int(value)
 
     # Print the key-value pairs
     # for key, value in data_dict.items():
