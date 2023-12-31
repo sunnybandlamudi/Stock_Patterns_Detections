@@ -57,3 +57,4 @@ def calcuate_stock():
 
 # calcuate stock
 calcuate_stock()
+
