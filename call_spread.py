@@ -74,7 +74,7 @@ fno_lot = get_fno_lot_size();
 
 def get_option_chain(stock):
     session = req.Session()
-    session.get('https://www.nseindia.com', headers=head)
+    session.get('https://www.nseindia.com/get-quotes/derivatives',params={'symbol': stock}, headers=head)
     data = session.get('https://www.nseindia.com/api/option-chain-equities', params={'symbol': stock}, headers=head)
     # pprint(data.json()['filtered'])
     return DotMap(data.json())
